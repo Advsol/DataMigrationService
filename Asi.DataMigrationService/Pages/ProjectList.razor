@@ -1,0 +1,92 @@
+﻿@page "/projects"
+
+@using Asi.DataMigrationService.Lib.Data
+@using Asi.DataMigrationService.Lib.Data.Models
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext dbContext
+@inject AuthenticationStateProvider  AuthenticationStateProvider
+
+<h1>Projects</h1>
+
+@if (projects == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatTable Items="@projects" PageSize="25" ShowPaging="@(projects.Count() > 25)" UseSortHeaderRow="true">
+        <MatTableHeader>
+            <MatSortHeaderRow SortChanged="@SortData">
+                <MatSortHeader SortId="Name" Style="width:20%;">Name</MatSortHeader>
+                <MatSortHeader SortId="Description" Style="width:40%;">Description</MatSortHeader>
+                <MatSortHeader SortId="CreatedOn" Style="width:20%;">Created</MatSortHeader>
+                <MatSortHeader SortId="UpdatedOn" Style="width:20%;">Updated</MatSortHeader>
+                <th style="width:auto;">
+                    <MatTooltip Tooltip="Add project">
+                        <MatIconButton Icon="@MatIconNames.Add" Link="/project" RefBack="@context"></MatIconButton>
+                    </MatTooltip>
+                </th>
+            </MatSortHeaderRow>
+        </MatTableHeader>
+        <MatTableRow>
+            <td>@context.Name</td>
+            <td>@context.Description</td>
+            <td>@context.CreatedOn.ToLocalTime()</td>
+            <td>@context.UpdatedOn.ToLocalTime()</td>
+            <td><MatIconButton Icon="arrow_forward" Link="@($"/project/{context.ProjectId}")" /></td>
+        </MatTableRow>
+    </MatTable>
+}
+@code {
+    IEnumerable<Project> projects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity;
+        var tenantId = Lib.MigrationUtility.GetTenant(user);
+        projects = await dbContext.Projects.Where(p => p.TenantId == tenantId).OrderByDescending(p => p.UpdatedOn).ToListAsync();
+
+        if (projects.Count() > 1)
+            projects = projects.OrderByDescending(i => i.CreatedOn).ToArray();
+
+        SortData(null);
+    }
+
+    void SortData(MatSortChangedEvent sort)
+    {
+        var sortedData = projects.ToArray();
+        if (!(sort == null || sort.Direction == MatSortDirection.None || string.IsNullOrEmpty(sort.SortId)))
+        {
+            Comparison<Project> comparison = null;
+            switch (sort.SortId)
+            {
+                case "Name":
+                    comparison = (s1, s2) => string.Compare(s1.Name, s2.Name, StringComparison.InvariantCultureIgnoreCase);
+                    break;
+                case "Description":
+                    comparison = (s1, s2) => string.Compare(s1.Description, s2.Description, StringComparison.InvariantCultureIgnoreCase);
+                    break;
+                case "UpdatedOn":
+                    comparison = (s1, s2) => s1.UpdatedOn.CompareTo(s2.UpdatedOn);
+                    break;
+                case "CreatedOn":
+                default:
+                    comparison = (s1, s2) => s1.CreatedOn.CompareTo(s2.CreatedOn);
+                    break;
+            }
+            if (comparison != null)
+            {
+                if (sort.Direction == MatSortDirection.Desc)
+                {
+                    Array.Sort(sortedData, (s1, s2) => -1 * comparison(s1, s2));
+                }
+                else
+                {
+                    Array.Sort(sortedData, comparison);
+                }
+            }
+            projects = sortedData;
+        }
+    }
+}

@@ -1,0 +1,134 @@
+﻿@page "/publish/{projectId}/{mode}"
+@using Asi.DataMigrationService.Lib.Publisher
+@using Asi.DataMigrationService.ComponentLib
+@using Asi.DataMigrationService.Core.Extensions
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+@inject IModalService Modal
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<MatChip Label="Back" LeadingIcon="arrow_back" @onclick="Back"> </MatChip>
+
+<h2>Target System</h2>
+@if (!IsInitialized)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatPaper Outlined="true" Rounded="true" Class="mb-3" Elevation="0">
+        <div class="px-3 py-3">
+            <MatButton OnClick="@RunJob" Disabled="@IsSubmitted" Outlined="true" Style="min-width:106px;">@ModeText</MatButton>
+            <MatButtonLink Icon="link" Href="@NavigateTo()" Class="ml-2" OnClick="@ResetState" Style="min-width:265px;">@AlternateMode</MatButtonLink>
+        </div>
+    </MatPaper>
+
+    <MatPaper Outlined="true" Rounded="true" Class="pt-3 pl-3 pb-3 pr-1" Elevation="0">
+        <MatVirtualScroll style="overflow-y:auto;height:500px;" ItemType="string" Items="@Items" ItemHeight="30" Disabled="true">
+            <ItemTemplate>
+                @context
+            </ItemTemplate>
+        </MatVirtualScroll>
+    </MatPaper>
+}
+
+@code {
+    [Parameter]
+    public string ProjectId { get; set; }
+    [Parameter]
+    public string Mode { get; set; }
+    public string AlternateMode { get; set; }
+    public string ModeText { get; set; }
+
+    private IList<string> Items { get; set; } = new List<string>();
+    private bool IsInitialized { get; set; }
+    private bool IsEditMode { get; set; } = true;
+    private LoginInformation LoginInformation { get; set; } = new LoginInformation();
+
+    private int JobNumber { get; set; }
+
+    private HubConnection _hubConnection;
+
+    private bool IsSubmitted { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+
+        _hubConnection = new HubConnectionBuilder()
+        .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/DataMigrationService"), options =>
+        {
+
+        })
+        .WithAutomaticReconnect()
+        .Build();
+
+        await _hubConnection.StartAsync();
+
+        _hubConnection.On<string>("PublishMessage", async (message) =>
+        {
+            await InvokeAsync(() =>
+            {
+                Items.Add(message.ToString());
+                StateHasChanged();
+            });
+
+        });
+
+        IsInitialized = true;
+    }
+
+    async Task RunJob()
+    {
+        var parameters = new ModalParameters();
+        parameters.Add("LoginInformation", LoginInformation);
+        var selector = Modal.Show<RemoteCredentials>("Target System Login", parameters, new ModalOptions { Position = ModalPosition.Middle, DisableBackgroundCancel = true, HideCloseButton = true });
+        _ = await selector.Result;
+        if (!LoginInformation.IsValidated) return;
+
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity;
+
+        var jobParameters = new JobParameters
+            {
+                RunType = Mode.EqualsOrdinalIgnoreCase("Publish") ? RunType.Publish : RunType.Validate,
+                ProjectId = ProjectId,
+                TargetLoginInformation = new LoginInformation
+                {
+                    Uri = LoginInformation.Uri,
+                    UserCredentials = LoginInformation.UserCredentials
+                },
+                SubmittedBy = user.Name
+            };
+        IsSubmitted = true;
+        JobNumber = await _hubConnection.InvokeAsync<int>("RunPublishJob", jobParameters);
+        if (JobNumber > 0)
+            await _hubConnection.InvokeAsync("AddToGroup", $"Job:{JobNumber}");
+    }
+
+    void Back()
+    {
+        NavigationManager.NavigateTo($"/project/{ProjectId}");
+    }
+
+    string NavigateTo()
+    {
+        if (@Mode.EqualsOrdinalIgnoreCase("Validate"))
+        {
+            ModeText = "Validate";
+            AlternateMode = "Migrate to target system";
+            return $"/publish/{ProjectId}/Publish";
+        }
+        else
+        {
+            ModeText = "Migrate";
+            AlternateMode = "Validate on target system";
+            return $"/publish/{ProjectId}/Validate";
+        }
+    }
+
+    void ResetState()
+    {
+        IsSubmitted = false;
+        Items.Clear();
+    }
+
+}

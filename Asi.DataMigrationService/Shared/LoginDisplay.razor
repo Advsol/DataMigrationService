@@ -1,0 +1,44 @@
+﻿@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider  AuthenticationStateProvider
+
+<AuthorizeView>
+    <Authorized>
+        @context.User.Identity.Name
+        <a href="MicrosoftIdentity/Account/SignOut">Log out</a>
+    </Authorized>
+    <NotAuthorized>
+        Anonymous User
+        @if (RequireAuthentication)
+        {
+            <a href="MicrosoftIdentity/Account/SignIn">Log in</a>
+        }
+    </NotAuthorized>
+</AuthorizeView>
+@code {
+    private string _time = null;
+    private HubConnection _hubConnection;
+    protected override async Task OnInitializedAsync()
+    {
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/DataMigrationService"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<DateTime>("ShowTime", (message) =>
+        {
+            _time = message.ToString();
+            try
+            {
+                StateHasChanged();
+            }
+            catch (InvalidOperationException) {}
+        });
+
+        await _hubConnection.StartAsync();
+    }
+
+    [CascadingParameter(Name="RequireAuthentication")]
+    public bool RequireAuthentication { get; set; }
+}

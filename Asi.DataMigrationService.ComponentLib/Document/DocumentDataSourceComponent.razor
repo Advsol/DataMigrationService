@@ -1,0 +1,194 @@
+﻿@inherits DataSourceComponentBase
+@using Asi.Soa.Core.ServiceContracts
+@using Asi.DataMigrationService.Lib.Data.Models
+@using Asi.Soa.Core.DataContracts
+@using System.Globalization;
+@using Asi.DataMigrationService.Core
+@using Asi.DataMigrationService.MessageQueue.Interfaces
+
+@if (ProjectDataSource == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+<MatPaper Outlined="true" Rounded="true" Elevation="0">
+
+    <MatDialog @bind-IsOpen="@dialogIsOpen">
+        <MatDialogTitle>Confirm</MatDialogTitle>
+        <MatDialogContent>
+            <p><MatIcon Icon="@MatIconNames.Warning" Style="vertical-align: middle!important;"></MatIcon>Remove this data source?</p>
+        </MatDialogContent>
+        <MatDialogActions>
+            <MatButton OnClick="@(e => { dialogIsOpen = false; })" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@RemoveAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Confirm</MatButton>
+        </MatDialogActions>
+    </MatDialog>
+
+    <MatHeadline6 Class="m-0 ml-3 mt-3">
+        @Title
+    </MatHeadline6>
+
+    <MatTextField label="Name" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@ProjectDataSource.Name" Required="true" FullWidth="true" />
+
+    <div class="mx-3">
+        <MatTable Items="@_contentSources" @ref="matTable" PageSize="25" ShowPaging="@(_contentSources.Count() > 25)" Class="mb-0" HeaderRowClass="header-row">
+            <MatTableHeader>
+                <th align="center" style="width:120px;">Selected</th>
+                <th style="width:25%;">Name</th>
+                <th>Type</th>
+                <th>Path</th>
+            </MatTableHeader>
+            <MatTableRow>
+                <td align="center" style="width:120px;"><MatCheckbox @bind-Value="@context.IsSelected" Disabled="@(!IsEditMode)" /></td>
+                <td>@(context.Document.Name)</td>
+                <td>@(((DocumentSummaryData)(context.Data)).DocumentTypeId)</td>
+                <td>@(((DocumentSummaryData)(context.Data)).Path)</td>
+            </MatTableRow>
+        </MatTable>
+        <div class="mt-3 text-center text-secondary" hidden="@(_contentSources.Count() == 0 ? false:true)">No data found</div>
+    </div>
+
+    <div class="p-0 m-3">
+        <MatButton OnClick="@EditAsync" Disabled="@(IsEditMode)" Outlined="true" Class="mr-1">Edit</MatButton>
+        <MatButton OnClick="@SelectAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-1">Select @DocumentTypeName</MatButton>
+        <MatButton OnClick="@CancelAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-1">Cancel</MatButton>
+        <MatButton OnClick="@SaveChangesAsync" Disabled="@(!IsEditMode)" Type="submit" Outlined="true" Class="mr-1">Save changes</MatButton>
+        <MatButton OnClick="@DeleteDialogAsync" Disabled="@(IsEditMode)" Outlined="true" Class="mr-1">Remove</MatButton>
+    </div>
+
+</MatPaper>
+}
+
+@code
+{
+    bool dialogIsOpen = false;
+
+    MatTable<DocumentSourceDataInfo> matTable;
+
+    [Parameter]
+    public string DocumentRoot { get; set; }
+
+    [Parameter]
+    public string DocumentTypeName { get; set; }
+
+    IList<DocumentSourceDataInfo> _contentSources = new List<DocumentSourceDataInfo>();
+    async Task EditAsync()
+    {
+        IsEditMode = true;
+        await LoadData();
+        StateHasChanged();
+    }
+
+    async Task CancelAsync()
+    {
+        IsEditMode = false;
+        if (ProjectDataSourceId == 0)
+        {
+            NavigationManager.NavigateTo($"/project/{Project?.ProjectId}", true);
+        }
+        else
+            await LoadData();
+        StateHasChanged();
+    }
+    async Task SelectAsync()
+    {
+        if (!await EnsureSourceCredentialsAsync())
+            return;
+        var parameters = new ModalParameters();
+        parameters.Add("Path", DocumentRoot);
+        parameters.Add("SourceLoginInformation", SourceLoginInformation);
+        parameters.Add("SelectedList", _contentSources);
+        var selector = Modal.Show<DocumentSelector>("Select " + DocumentTypeName, parameters, new ModalOptions { Position = ModalPosition.Middle, Size = ModalSize.Automatic, DisableBackgroundCancel = true, HideCloseButton = true });
+        var result = await selector.Result;
+        if (!result.Cancelled)
+        {
+            _contentSources = (IList<DocumentSourceDataInfo>)result.Data;
+        }
+        StateHasChanged();
+
+    }
+
+    private Task<bool> LoadData()
+    {
+        _contentSources = ProjectDataSource.Data != null
+            ? SafeDeserializeObject<IList<DocumentSourceDataInfo>>(ProjectDataSource.Data) ?? new List<DocumentSourceDataInfo>()
+            : new List<DocumentSourceDataInfo>();
+
+        if (_contentSources.Count() > 0)
+            matTable.SetPageSize(BaseMatTable.PageDirection.First);
+
+        return Task.FromResult(true);
+    }
+
+    protected override async Task SaveChangesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ProjectDataSource.Name))
+            ProjectDataSource.Name = string.Format(CultureInfo.CurrentCulture, "{0} {1}", Title.Replace("iMIS", ""), DateTime.Now.ToString("yyyy-MM-dd HH':'mm':'ss"));
+
+        var selectedSources = _contentSources.Where(p => p.IsSelected).ToList();
+        ProjectDataSource.Data = Newtonsoft.Json.JsonConvert.SerializeObject(selectedSources, GlobalSettings.JsonSerializerSettings);
+        await base.SaveChangesAsync();
+        _contentSources = selectedSources;
+        await SaveContentAsync();
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadData();
+    }
+
+    async Task SaveContentAsync()
+    {
+        await DeleteImportDataAsync();
+
+        ProjectDataSource = await ProjectQueries.GetProjectDataSourceAsync(ProjectDataSource.ProjectDataSourceId);
+
+        var import = new ProjectImport { ProjectDataSourceId = ProjectDataSource.ProjectDataSourceId, Name = "_", Data = new List<ProjectImportData>(), PropertyNames = "_" };
+        var command = new Lib.Messages.Commands.AddProjectImport(import.ProjectDataSourceId, "_", new List<string> { "_" });
+
+        var result = await MessageQueueEndpoint.RequestAsync(command, new SendOptions { ServiceContext = await GetServiceContextAsync() });
+        if (!result.IsSuccessStatusCode)
+        {
+            ShowError(result.Message);
+            return;
+        }
+
+        int rowNumber = 1;
+        var service = ClientFactory.Create<IContentService>(SourceLoginInformation.Uri, SourceLoginInformation.UserCredentials);
+        var list = new List<ProjectImportData>();
+        foreach (var content in _contentSources.Where(p => p.IsSelected))
+        {
+            var response2 = await service.ExportContentAsync(((DocumentSummaryData)(content.Data)).Path);
+            if (response2.IsSuccessStatusCode)
+            {
+                var data = response2.Result;
+                var importData = new ProjectImportData
+                {
+                    ProjectImportId = import.ProjectImportId,
+                    RowNumber = ++rowNumber
+                };
+                importData.SetData(new object[] { data });
+                list.Add(importData);
+            }
+
+        }
+        var dataCommand = new Lib.Messages.Commands.AddProjectImportData((int)result.Result, list);
+        var result2 = await MessageQueueEndpoint.RequestAsync(dataCommand, new SendOptions { ServiceContext = await GetServiceContextAsync() });
+        if (!result2.IsSuccessStatusCode)
+        {
+            ShowError(result2.Message);
+            return;
+        }
+
+    }
+
+    Task DeleteDialogAsync()
+    {
+        dialogIsOpen = true;
+        return Task.CompletedTask;
+    }
+
+}

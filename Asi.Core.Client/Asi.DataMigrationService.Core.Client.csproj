@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <CodeAnalysisRuleSet>..\Solution.Ruleset</CodeAnalysisRuleSet>    
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Castle.Core" Version="5.1.1" />
+    <PackageReference Include="IdentityModel" Version="7.0.0" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.Client" Version="6.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Asi.Core\Asi.DataMigrationService.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Asi.Contracts">
+      <HintPath>..\Libraries\Asi.Contracts.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

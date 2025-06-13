@@ -1,0 +1,79 @@
+﻿@page "/imports/{projectId}/{dataSourceId:int}/{name}"
+
+@using Asi.DataMigrationService.Lib.Data
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext dbContext
+@inject IMatToaster Toaster
+@inject NavigationManager NavigationManager
+
+<MatChip Label="Back" LeadingIcon="arrow_back" @onclick="Back"> </MatChip>
+<h1>Import Data</h1>
+@if (data == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{  
+    <div style="width:83vw;">
+        <MatTable Items="@data" class="mat-elevation-z4 mb-3" PageSize="25" ShowPaging="@(data.Count() > 25)" DebounceMilliseconds="150" 
+                  Style="width:100%; min-height: 600px; max-height: 600px; overflow-y: auto; overflow-x: auto;"
+                  PagingRecordsCountPropertyName="">
+            <MatTableHeader>
+                <th>Row</th>
+                @foreach (var columnName in columnNames)
+                {
+                    <th style="width:auto;">@columnName</th>
+                }
+            </MatTableHeader>
+            <MatTableRow>
+                <td>@context.RowNumber</td>
+                @for (int i = 0; i < context.Data.Count; i++)
+                    {
+                        <td>@context.Data[i]</td>
+                    }
+            </MatTableRow>
+        </MatTable>
+    </div>    
+}
+
+@code {
+    IEnumerable<RowData> data;
+
+    [Parameter]
+    public string ProjectId { get; set; }
+    [Parameter]
+    public int DataSourceId { get; set; }
+    [Parameter]
+    public string Name { get; set; }
+
+    private IList<string> columnNames;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var import = (await dbContext.ProjectImports.Where(p => p.ProjectDataSource.ProjectId == ProjectId && p.ProjectDataSourceId == DataSourceId && p.Name == Name).ToListAsync()).FirstOrDefault();
+        if (import is null)
+        {
+            ShowError("Not a valid project or import");
+            return;
+        }
+        columnNames = import.GetPropertyNameList();
+        var selected = await dbContext.ProjectImportDatas.Where(p => p.ProjectImportId == import.ProjectImportId).OrderBy(p => p.RowNumber).ToListAsync();
+        data = selected.Select(p => new RowData { RowNumber = p.RowNumber, Data = p.GetDataList() });
+    }
+
+    private void ShowError(string message)
+    {
+        Toaster.Add(message, MatToastType.Danger, "Error");
+    }
+
+    void Back()
+    {
+        NavigationManager.NavigateTo($"/project/{ProjectId}");
+    }
+    class RowData
+    {
+        public int RowNumber { get; set; }
+        public IList<object> Data { get; set; }
+    }
+    }

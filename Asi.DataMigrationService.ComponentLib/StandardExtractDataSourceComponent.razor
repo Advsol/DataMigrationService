@@ -1,0 +1,197 @@
+﻿@inherits DataSourceComponentBase
+@using Asi.DataMigrationService.Lib.Publisher
+@using System.Globalization;
+@using Asi.DataMigrationService.Core
+@using Asi.DataMigrationService.Core.Extensions
+@using Asi.Soa.Core.DataContracts;
+@using Asi.Soa.Communications.DataContracts;
+@using Asi.Soa.Commerce.DataContracts;
+
+@if (ProjectDataSource == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+<MatPaper Outlined="true" Rounded="true" Elevation="0">
+
+    <MatDialog @bind-IsOpen="@dialogIsOpen">
+        <MatDialogTitle>Confirm</MatDialogTitle>
+        <MatDialogContent>
+            <p><MatIcon Icon="@MatIconNames.Warning" Style="vertical-align: middle!important;"></MatIcon>Remove this data source?</p>
+        </MatDialogContent>
+        <MatDialogActions>
+            <MatButton OnClick="@(e => { dialogIsOpen = false; })" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@RemoveAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Confirm</MatButton>
+        </MatDialogActions>
+    </MatDialog>
+
+    <div hidden="@HideProgress" class="middle-center">
+        <h4 class="mat-subtitle1 middle-center">Loading</h4>
+        <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+    </div>
+
+    <MatHeadline6 Class="m-0 ml-3 mt-3">
+        @Title
+    </MatHeadline6>
+
+    <MatTextField label="Name" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@ProjectDataSource.Name" Required="true" FullWidth="true" />
+
+    <div class="mx-3">
+        <MatTable Items="@_urlMappingSources" PageSize="25" ShowPaging="@(_urlMappingSources.Count() > 25)" Class="mb-0" DebounceMilliseconds="150" HeaderRowClass="header-row">
+            <MatTableHeader>
+                <th align="center" style="width:120px;">Selected</th>
+                @SelectorHeaderFormatting()
+            </MatTableHeader>
+            <MatTableRow>
+                <td align="center" style="width:120px;"><MatCheckbox @bind-Value="@context.IsSelected" Disabled="@(!IsEditMode)" /></td>
+                @SelectorDetailFormatting(context)
+            </MatTableRow>
+        </MatTable>
+        <div class="mt-3 text-center text-secondary" hidden="@(_urlMappingSources.Count() == 0 ? false:true)">No data found</div>
+
+        <div class="p-0 m-3">
+            <MatButton OnClick="@EditAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Edit</MatButton>
+            <MatButton OnClick="@CancelAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@SaveChangesAsync" Disabled="@(!IsEditMode)" Type="submit" Outlined="true" Class="mr-1">Save changes</MatButton>
+            <MatButton OnClick="@DeleteDialogAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Remove</MatButton>
+        </div>
+    </div>
+
+</MatPaper>
+}
+
+@code
+{
+    private bool HideProgress { get; set; } = true;
+
+    bool dialogIsOpen = false;
+
+    IList<SourceDataInfo> _urlMappingSources = new List<SourceDataInfo>();
+    async Task EditAsync()
+    {
+        HideProgress = false;
+        IsEditMode = true;
+        await LoadData();
+        HideProgress = true;
+        StateHasChanged();
+    }
+
+    async Task CancelAsync()
+    {
+        HideProgress = true;
+        IsEditMode = false;
+        if (ProjectDataSourceId == 0)
+        {
+            NavigationManager.NavigateTo($"/project/{Project?.ProjectId}", true);
+        }
+        else await LoadData();
+        StateHasChanged();
+    }
+
+    private async Task<bool> LoadData()
+    {
+        var selected = ProjectDataSource.Data != null
+            ? SafeDeserializeObject<List<SourceDataInfo>>(ProjectDataSource.Data) ?? new List<SourceDataInfo>()
+            : new List<SourceDataInfo>();
+
+        if (IsEditMode && await EnsureSourceCredentialsAsync())
+        {
+
+            var boService = ClientFactory.Create(DataSourcePublisherBase.EntityTypeName, SourceLoginInformation.Uri, SourceLoginInformation.UserCredentials);
+
+            dynamic response;
+
+            if (DataSourcePublisherBase.EntityTypeName.Equals("Item"))
+            {
+                response = await boService.FindAllAsync(CriteriaData.StartsWith("ItemClass.ItemClassId", "SALES"));
+                if (!response.IsSuccessStatusCode)
+                {
+                    response = await boService.FindAllAsync(CriteriaData.NotEqual("ItemClass.ItemClassId", "a6235f02-b51b-4e55-9a19-e703c0706e90"), CriteriaData.NotEqual("ItemClass.ItemClassId", "df556911-af41-4ee8-819f-cc9fa6ff4711"));
+                }
+            }
+            else
+            {
+                response = await boService.FindAllAsync();
+            }
+
+            if (!response.IsSuccessStatusCode) return false;
+            var allSources = new List<SourceDataInfo>();
+            foreach (var item in response.Result)
+            {
+                if (item.GetType() == typeof(UrlMappingData))
+                {
+                    int typeCode = ((UrlMappingData)item).UrlMappingType.UrlMappingTypeCode;
+                    if (typeCode == 10 || typeCode == 20)
+                        allSources.Add(new SourceDataInfo { Data = item, Name = ((UrlMappingData)item).DirectoryName.Replace("/", "") });
+                }
+                else if (item.GetType() == typeof(TaskDefinitionData))
+                {
+                    if (!((TaskDefinitionData)item).IsSystem)
+                        allSources.Add(new SourceDataInfo { Data = item, Name = ((TaskDefinitionData)item).Name });
+                }
+                else if (item.GetType() == typeof(NotificationSetData))
+                {
+                    allSources.Add(new SourceDataInfo { Data = item, Name = ((NotificationSetData)item).Name });
+                }
+                else if (item.GetType() == typeof(ItemSetItemData))
+                {
+                    continue;
+                }
+                else
+                {
+                    allSources.Add(new SourceDataInfo { Data = item });
+                }
+            }
+
+            allSources = allSources.OrderBy(i => i.Name).ToList();
+
+            if (ProjectDataSource.Data != null)
+            {
+                foreach (var item in selected)
+                {
+                    var match = allSources.FirstOrDefault(p => p.Id.EqualsOrdinalIgnoreCase(item.Id));
+                    if (match != null)
+                    {
+                        match.IsSelected = item.IsSelected;
+                    }
+                }
+            }
+            _urlMappingSources = allSources;
+        }
+        else
+        {
+            _urlMappingSources = selected;
+        }
+        return true;
+    }
+
+    protected override async Task SaveChangesAsync()
+    {
+        HideProgress = false;
+        if (string.IsNullOrWhiteSpace(ProjectDataSource.Name))
+            ProjectDataSource.Name = string.Format(CultureInfo.CurrentCulture, "{0} {1}", Title.Replace("iMIS", ""), DateTime.Now.ToString("yyyy-MM-dd HH':'mm':'ss"));
+
+        var selectedSources = _urlMappingSources.Where(p => p.IsSelected).ToList();
+        ProjectDataSource.Data = Newtonsoft.Json.JsonConvert.SerializeObject(selectedSources, GlobalSettings.JsonSerializerSettings);
+        await base.SaveChangesAsync();
+        HideProgress = true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        HideProgress = false;
+        await LoadData();
+        HideProgress = true;
+    }
+
+    void SelectedChanged(ChangeEventArgs args) { }
+
+    Task DeleteDialogAsync()
+    {
+        dialogIsOpen = true;
+        return Task.CompletedTask;
+    }
+
+}

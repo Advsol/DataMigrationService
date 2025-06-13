@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>aspnet-Asi.DataMigrationService-76183834-6B58-4653-87CB-AA22D9C17540</UserSecretsId>
+    <CodeAnalysisRuleSet>..\Solution.Ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\.editorconfig" Link=".editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Blazor.Extensions.Logging" Version="2.0.4" />
+    <PackageReference Include="Blazor.Extensions.SignalR" Version="1.0.0" />
+    <PackageReference Include="Blazor.Extensions.Storage" Version="1.0.0" />
+    <PackageReference Include="MatBlazor" Version="2.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.8">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.2.0" />
+    <PackageReference Include="Microsoft.Identity.Web.UI" Version="3.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Asi.Core.Client\Asi.DataMigrationService.Core.Client.csproj" />
+    <ProjectReference Include="..\Asi.DataMigrationService.ComponentLib\Asi.DataMigrationService.ComponentLib.csproj" />
+    <ProjectReference Include="..\Asi.DataMigrationService.Lib\Asi.DataMigrationService.Lib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Asi.Contracts">
+      <HintPath>..\Libraries\Asi.Contracts.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Docs\iMIS Migrate.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

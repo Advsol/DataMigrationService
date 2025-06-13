@@ -1,0 +1,83 @@
+﻿@using Asi.DataMigrationService.Lib.Data.Models
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+@inject Lib.Queries.IProjectQueries ProjectQueries
+
+<h1>Job</h1>
+@if (!IsInitialized)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatTextField @bind-Value="@SubmittedOn" Label="Submitted" ReadOnly="true"></MatTextField>
+    <MatTextField @bind-Value="@SubmittedBy" Label="Submitted By" ReadOnly="true"></MatTextField>
+    <MatTextField @bind-Value="@State" Label="State" ReadOnly="true"></MatTextField>
+
+    <div hidden="@HideProgress">
+        <MatProgressBar Indeterminate="true"/>
+    </div>
+
+    <MatPaper Outlined="true" Rounded="false" Class="pt-3 pl-3 pb-3 pr-1" Elevation="0">
+        <MatVirtualScroll Class="mat-virtual-scroll-content" style="overflow-y:auto;height:500px;" ItemType="string" Items="@Items" ItemHeight="30" Disabled="true">
+            <ItemTemplate>
+                <div class="mat-virtual-scroll-item">@context</div>
+            </ItemTemplate>
+        </MatVirtualScroll>
+    </MatPaper>
+}
+
+@code {
+
+    [Parameter]
+    public int JobId { get; set; }
+
+    private Lib.Data.Models.ProjectJob projectJob { get; set; } = new ProjectJob();
+    private IList<string> Items { get; set; } = new List<string>();
+
+    private bool IsInitialized { get; set; }
+
+    private DateTime? SubmittedOn { get { return projectJob?.SubmittedOnUtc.ToLocalTime(); } set { } }
+    private string SubmittedBy { get { return projectJob.SubmittedBy; } set { } }
+    private string State { get { return projectJob.State.ToString(); } set { } }
+
+    private bool HideProgress { get; set; } = true;
+
+    private HubConnection _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/DataMigrationService"), options =>
+            {
+
+            })
+            .WithAutomaticReconnect()
+            .Build();
+
+        await _hubConnection.StartAsync();
+
+        _hubConnection.On<string>("PublishMessage", (message) =>
+        {
+            Items.Add(message.ToString());
+            StateHasChanged();
+        });
+
+        if (JobId > 0)
+        {
+            projectJob = await ProjectQueries.GetProjectJobAsync(JobId);
+            Items = (await ProjectQueries.GetProjectJobMessagesAsync(JobId)).Select(prop => prop.Message.ToString()).ToList();
+
+            await _hubConnection.InvokeAsync("AddToGroup", $"Job:{JobId}");
+
+            HideProgress = true;
+            if (!projectJob.State.Equals(ProjectJobState.Completed))
+                HideProgress = false;
+            if ((DateTime.UtcNow - projectJob.SubmittedOnUtc.ToLocalTime()).TotalMinutes >= 30)
+                HideProgress = true;
+
+        }
+        IsInitialized = true;
+    }
+
+}

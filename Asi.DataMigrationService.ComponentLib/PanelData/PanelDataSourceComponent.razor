@@ -1,0 +1,136 @@
+﻿@inherits PanelDataSourceComponentBase
+@using Asi.DataMigrationService.Core
+@using Asi.DataMigrationService.Core.Extensions
+
+
+@if (ProjectDataSource == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+<MatPaper Outlined="true" Rounded="true" Elevation="0">
+
+    <MatDialog @bind-IsOpen="@dialogIsOpen">
+        <MatDialogTitle>Confirm</MatDialogTitle>
+        <MatDialogContent>
+            <p><MatIcon Icon="@MatIconNames.Warning" Style="vertical-align: middle!important;"></MatIcon>Remove this data source?</p>
+        </MatDialogContent>
+        <MatDialogActions>
+            <MatButton OnClick="@(e => { dialogIsOpen = false; })" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@RemoveAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Confirm</MatButton>
+        </MatDialogActions>
+    </MatDialog>
+
+    <MatHeadline6 Class="m-0 ml-3 mt-3">
+        @Title
+    </MatHeadline6>
+
+    <MatTextField label="Name" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@ProjectDataSource.Name" Required="true" FullWidth="true" />
+
+    <div class="mx-3">
+        <MatTable Items="@_panelDataSources" PageSize="25" ShowPaging="@(_panelDataSources.Count() > 25)" Class="mb-0">
+            <MatTableHeader>
+                <th align="center">Selected</th>
+                <th style="white-space: nowrap;">Include Data</th>
+                <th>Name</th>
+            </MatTableHeader>
+            <MatTableRow>
+                <td align="center"><MatCheckbox @bind-Value="@context.IsSelected" Disabled="@(!IsEditMode)" /></td>
+                <td align="center"><MatCheckbox @bind-Value="@context.IncludeData" Disabled="@(!context.IsSelected || !IsEditMode || !context.CanIncludeData)" /></td>
+                <td>@context.Name</td>
+            </MatTableRow>
+        </MatTable>
+    </div>
+
+    <div class="p-0 m-3">
+        <MatButton OnClick="@EditAsync" Disabled="@(IsEditMode)" Outlined="true" Class="mr-2">Edit</MatButton>
+        <MatButton OnClick="@CancelAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-2">Cancel</MatButton>
+        <MatButton OnClick="@SaveChangesAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-2">Save changes</MatButton>
+        <MatButton OnClick="@DeleteDialogAsync" Disabled="@(IsEditMode)" Outlined="true" Class="mr-2">Remove</MatButton>
+    </div>
+
+</MatPaper>
+}
+
+@code
+{
+    bool dialogIsOpen = false;
+
+    IList<PanelDataSourceDataInfo> _panelDataSources = new List<PanelDataSourceDataInfo>();
+    async Task EditAsync()
+    {
+        IsEditMode = true;
+        await LoadData();
+        StateHasChanged();
+    }
+
+    async Task CancelAsync()
+    {
+        IsEditMode = false;
+        if (ProjectDataSourceId == 0)
+        {
+            NavigationManager.NavigateTo($"/project/{Project?.ProjectId}", true);
+        }
+        else await LoadData();
+        StateHasChanged();
+    }
+
+    private async Task LoadData()
+    {
+
+        var selected = ProjectDataSource.Data != null
+            ? SafeDeserializeObject<IList<PanelDataSourceDataInfo>>(ProjectDataSource.Data) ?? new List<PanelDataSourceDataInfo>()
+            : new List<PanelDataSourceDataInfo>();
+
+        if (IsEditMode && await EnsureSourceCredentialsAsync())
+        {
+            var boService = ClientFactory.Create<Asi.Soa.Core.ServiceContracts.IBOEntityDefinitionService>(SourceLoginInformation.Uri, SourceLoginInformation.UserCredentials);
+            var response = await boService.FindAllAsync();
+            if (!response.IsSuccessStatusCode) return;
+            var allSources = response.Result.Where(p => p.IsDesignable).Select(p => new PanelDataSourceDataInfo { Data = p }).ToList();
+
+            if (ProjectDataSource.Data != null)
+            {
+                foreach (var item in selected)
+                {
+                    var match = allSources.FirstOrDefault(p => p.Name.EqualsOrdinalIgnoreCase(item.Name));
+                    if (match != null)
+                    {
+                        match.IsSelected = item.IsSelected;
+                        match.IncludeData = item.IncludeData;
+                    }
+                }
+            }
+            _panelDataSources = allSources;
+        }
+        else
+        {
+            _panelDataSources = selected;
+        }
+    }
+
+    protected override async Task SaveChangesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ProjectDataSource.Name))
+            ProjectDataSource.Name = string.Format("{0} {1}", Title, DateTime.Now.ToString("yyyy-MM-dd HH':'mm':'ss"));
+
+        var selectedSources = _panelDataSources.Where(p => p.IsSelected).ToList();
+        ProjectDataSource.Data = Newtonsoft.Json.JsonConvert.SerializeObject(selectedSources, GlobalSettings.JsonSerializerSettings);
+        await base.SaveChangesAsync();
+        await SaveAllPanelDataAsync(selectedSources);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadData();
+    }
+
+    Task DeleteDialogAsync()
+    {
+        dialogIsOpen = true;
+        return Task.CompletedTask;
+    }
+
+}

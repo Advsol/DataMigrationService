@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>aspnet-Asi.DataMigrationService-76183834-6B58-4653-87CB-AA22D9C17540</UserSecretsId>
+    <CodeAnalysisRuleSet>..\Solution.Ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Publisher\Party\PartyImportTemplate.cs" />
+    <Compile Remove="Publisher\Party\PartyProcessor.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Publisher\Party\PartyImportTemplate.cs" />
+    <None Include="Publisher\Party\PartyProcessor.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="13.0.1" />
+    <PackageReference Include="FluentValidation" Version="11.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="8.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.8">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Scrutor" Version="5.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Asi.Core.Client\Asi.DataMigrationService.Core.Client.csproj" />
+    <ProjectReference Include="..\Asi.MessageQueue\Asi.DataMigrationService.MessageQueue.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Asi.Contracts">
+      <HintPath>..\Libraries\Asi.Contracts.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,19 @@
+﻿@page "/job/{jobId}"
+@inject NavigationManager NavigationManager
+
+<MatChip Label="Back" LeadingIcon="arrow_back" @onclick="Back"> </MatChip>
+<JobDisplayLog JobId="@int.Parse(jobId?? "0")">
+</JobDisplayLog>
+
+@code {
+    [Parameter]
+    public string jobId { get; set; }
+
+
+
+    void Back()
+    {
+        NavigationManager.NavigateTo("/job");
+    }
+
+}

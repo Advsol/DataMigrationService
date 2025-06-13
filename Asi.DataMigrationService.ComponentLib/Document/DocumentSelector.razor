@@ -1,0 +1,202 @@
+﻿@using Asi.DataMigrationService.Core.Client
+@using Asi.DataMigrationService.Core.Extensions
+@using Asi.DataMigrationService.Lib.Publisher
+@using Asi.Soa.Core.ServiceContracts
+@inject ICommonServiceHttpClientFactory ClientFactory
+@inject IMatToaster Toaster
+@inject IJSRuntime JS;
+
+@if (CurrentList == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatChipSet>
+        @foreach (var item in BreadCrumbs)
+        {
+            <MatChip Label="@item.Name" @onclick="@(async () => await SetAddressAsync(item.Address))" LeadingIcon=@(BreadCrumbs.Last() != item ? "folder" : "folder_open") />
+        }
+    </MatChipSet>
+    <MatPaper Class="mb-2" Elevation="0" Style="width:1024px;min-height:600px;max-height:600px;overflow-y:auto;" Id="dataSelectorPanel">
+        <MatTable Items="@CurrentList" Class="my-0" @ref="table" Style="width:100%;height:100%;overflow-y:hidden;" PageSize="@pageSize" ShowPaging="@showPaging">
+            <MatTableHeader>
+                <th align="center">Selected</th><th style="width:90%;">Name</th><th align="center" style="width:100px;">Type</th><th style="width:100px;"></th>
+            </MatTableHeader>
+            <MatTableRow>
+                <td align="center"><MatCheckbox @bind-Value="@context.IsSelected" Disabled="@(context.IsSelectedByParent || context.IsSystem)" /></td>
+                <td>@context.AlternateName</td>
+                <td align="center">@context.Document.DocumentTypeId</td>
+                <td align="center">
+                    @if (context.Document.IsFolder)
+                        {<MatIconButton Icon="arrow_forward" OnClick="@(async () => await NavigateToFolder((DocumentSourceDataInfo)context))" />}
+                </td>
+            </MatTableRow>
+        </MatTable>
+    </MatPaper>
+
+    <MatPaper Class="middle-center" Outlined="false" Elevation="0" Style=@(CurrentList.Count() == 0 ? "display:block;" : "display:none;")>No results found</MatPaper>
+  
+    <div class="mat-layout-grid p-0">
+        <div class="mat-layout-grid-inner">
+            <div class="mat-layout-grid-cell mat-layout-grid-cell-align-middle">
+                <MatButton @onclick="Save" Type="submit" Outlined="true" Class="mr-1">Save</MatButton>
+                <MatButton @onclick="Cancel" Type="cancel" Outlined="true" Class="mr-1">Cancel</MatButton>
+            </div>
+            <div class="mat-layout-grid-cell mat-layout-grid-cell-align-middle" style="text-align:center!important">
+                <MatIcon Icon="notification_important" Style="vertical-align: middle!important;"></MatIcon>System documents are not displayed                
+            </div>
+            <div class="mat-layout-grid-cell mat-layout-grid-cell-align-middle">
+                <div class="float-right">Viewing @CurrentList.Count() item(s)</div>
+            </div>
+        </div>
+    </div>
+
+}
+@code {
+    MatTable<DocumentSourceDataInfo> table;
+
+    [CascadingParameter] BlazoredModalInstance BlazoredModal { get; set; }
+
+    [Parameter]
+    public IList<DocumentSourceDataInfo> SelectedList { get; set; } // passes selected list
+
+    [Parameter]
+    public string Path { get; set; }
+
+    [Parameter]
+    public LoginInformation SourceLoginInformation { get; set; }
+
+    [Parameter]
+    public int pageSize { get; set; }
+
+    [Parameter]
+    public bool showPaging { get; set; }
+
+    IList<(string Name, string Address)> BreadCrumbs = new List<(string Name, string Address)>();
+
+    IList<DocumentSourceDataInfo> CurrentList = null; // current list showing
+
+    IList<DocumentSourceDataInfo> LocalSelectedList = null;
+
+    async Task SetAddressAsync(string address)
+    {
+        Path = address;
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        LocalSelectedList = SelectedList;
+        await LoadDataAsync();
+    }
+
+    Task LoadDataAsync()
+    {
+        var service = ClientFactory.Create<IDocumentSummaryService>(SourceLoginInformation.Uri, SourceLoginInformation.UserCredentials);
+        var response = service.FindDocumentsInFolder(Path, new string[0], true);
+        if (!response.IsSuccessStatusCode)
+        {
+            ShowError(response.Message);
+            return Task.CompletedTask;
+        }
+
+        CurrentList = response.Result.Select(item => new DocumentSourceDataInfo
+        {
+            Data = item,
+            IsSelected = LocalSelectedList.Any(p => p.Document.DocumentVersionId == item.DocumentVersionId && p.IsSelected) || IsSeletedByParent(item),
+            IsSelectedByParent = IsSeletedByParent(item)
+        }).Where(i => i.IsSystem == false || (i.IsSystem == true && i.Document.DocumentTypeId.Equals("FOL"))).ToList();
+
+        var parts = Path.Split("/", StringSplitOptions.RemoveEmptyEntries);
+        BreadCrumbs.Clear();
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var name = parts[i];
+            var address = string.Join('/', parts, 0, i + 1);
+            if (address == "$" || address == "@") address += "/";
+            BreadCrumbs.Add((name, address));
+        }
+
+        if (Path.Contains("Design Business Object Definition"))
+        {
+            BreadCrumbs.Remove(("$", "$/"));
+        }
+
+        if (table != null)
+        {
+            JS.InvokeAsync<string>("resetScrollPosition", "dataSelectorPanel");
+        }
+
+        showPaging = (CurrentList.Count() > 1000);
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    bool IsSeletedByParent(Asi.Soa.Core.DataContracts.DocumentSummaryData document)
+    {
+        return LocalSelectedList.Any(p => document.Path.StartsWithOrdinalIgnoreCase(p.Document.Path + "/") && document.DocumentVersionId != p.Document.DocumentVersionId);
+    }
+
+    async Task NavigateToFolder(DocumentSourceDataInfo item)
+    {
+        SaveCurrentList();
+        if (item != null)
+        {
+            if (item.Document.IsFolder)
+            {
+                Path = item.Document.Path;
+                await LoadDataAsync();
+            }
+        }
+
+        this.StateHasChanged();
+    }
+
+    void SaveCurrentList()
+    {
+        foreach (var item in CurrentList)
+        {
+            var localSelectedItem = LocalSelectedList.FirstOrDefault(p => p.Id == item.Id);
+            if (item.IsSelected && !item.IsSelectedByParent)
+            {
+                if (localSelectedItem == null)
+                    LocalSelectedList.Add(item);
+            }
+            else
+            {
+                if (localSelectedItem != null)
+                    LocalSelectedList.Remove(localSelectedItem);
+            }
+        }
+    }
+
+    void Save()
+    {
+        SaveCurrentList();
+        BlazoredModal.CloseAsync(ModalResult.Ok(LocalSelectedList.Where(p => p.IsSelected).ToList()));
+    }
+
+    void Cancel()
+    {
+        BlazoredModal.CancelAsync();
+    }
+
+    private void ShowError(string message)
+    {
+        Toaster.Add(message, MatToastType.Danger, "Error");
+    }
+
+    private void ShowSuccess(string message)
+    {
+        Toaster.Add(message, MatToastType.Success);
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        pageSize = 1000;
+    }
+}

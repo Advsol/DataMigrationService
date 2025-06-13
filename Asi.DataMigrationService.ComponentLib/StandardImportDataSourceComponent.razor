@@ -1,0 +1,91 @@
+﻿@inherits DataSourceComponentBase
+
+@if (ProjectDataSource == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatDialog @bind-IsOpen="@dialogIsOpen">
+        <MatDialogTitle>Confirm</MatDialogTitle>
+        <MatDialogContent>
+            <p><MatIcon Icon="@MatIconNames.Warning" Style="vertical-align: middle!important;"></MatIcon>Remove this data source?</p>
+        </MatDialogContent>
+        <MatDialogActions>
+            <MatButton OnClick="@(e => { dialogIsOpen = false; })" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@RemoveAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-1">Confirm</MatButton>
+        </MatDialogActions>
+    </MatDialog>
+
+    <MatCard class="demo-mat-card">
+        <div class="demo-mat-card-content px-3 py-1">
+            <MatHeadline6 class="demo-mat-card-clean-margin">
+                @Title
+            </MatHeadline6>
+        </div>
+        <MatCardContent>
+            <MatTextField label="Name" Style="margin-bottom: 20px" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@ProjectDataSource.Name" />
+            <div hidden="@(Project.IsLocked || (IsEditMode && ProjectDataSourceId == 0) )"> <MatFileUpload OnChange="@FilesReadyForContent"></MatFileUpload></div>
+        </MatCardContent>
+        <MatCardActionButtons Class="p-2">
+            <MatButton OnClick="@Edit" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-2">Edit</MatButton>
+            <MatButton OnClick="@Cancel" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-2">Cancel</MatButton>
+            <MatButton OnClick="@SaveChangesAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-2">Save changes</MatButton>
+            <MatButton OnClick="@ViewImport" Disabled="@(IsEditMode || ImportCount == 0)" Outlined="true" Class="mr-2">View Import data</MatButton>
+            <MatButton OnClick="@DeleteDialogAsync" Disabled="@(IsEditMode || Project.IsLocked)" Outlined="true" Class="mr-2">Remove</MatButton>
+        </MatCardActionButtons>
+    </MatCard>
+}
+
+@code
+{
+    bool dialogIsOpen = false;
+
+    void Edit()
+    {
+        IsEditMode = true;
+        StateHasChanged();
+    }
+
+    void Cancel()
+    {
+        IsEditMode = false;
+        if (ProjectDataSourceId == 0)
+        {
+            NavigationManager.NavigateTo($"/project/{Project?.ProjectId}", true);
+        }
+        StateHasChanged();
+    }
+
+    void ViewImport()
+    {
+        NavigationManager.NavigateTo($"/imports/{Project?.ProjectId}/{ProjectDataSourceId}/_");
+    }
+
+    protected override async Task SaveChangesAsync()
+    {
+        await base.SaveChangesAsync();
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        if (ProjectDataSourceId == 0)
+        {
+            ProjectDataSource = new Lib.Data.Models.ProjectDataSource();
+            IsEditMode = true;
+        }
+        else
+        {
+            ProjectDataSource = await ProjectQueries.GetProjectDataSourceAsync(ProjectDataSourceId);
+        }
+    }
+
+    Task DeleteDialogAsync()
+    {
+        dialogIsOpen = true;
+        return Task.CompletedTask;
+    }
+
+}

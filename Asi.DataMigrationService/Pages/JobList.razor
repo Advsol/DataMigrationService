@@ -1,0 +1,91 @@
+﻿@page "/job"
+
+@using Asi.DataMigrationService.Lib.Data.Models
+
+@inject Lib.Queries.IProjectQueries ProjectQueries
+@inject AuthenticationStateProvider  AuthenticationStateProvider
+
+<h1>Jobs</h1>
+
+@if (jobs == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatTable Items="@jobs" PageSize="25" ShowPaging="@(jobs.Count() > 25)" UseSortHeaderRow="true">
+        <MatTableHeader>
+            <MatSortHeaderRow SortChanged="@SortData">
+                <MatSortHeader SortId="Name" Style="width:30%;">Project</MatSortHeader>
+                <MatSortHeader SortId="SubmittedBy" Style="width:20%;">Submitted By</MatSortHeader>
+                <MatSortHeader SortId="SubmittedOnUtc" Style="width:20%;">Submitted On</MatSortHeader>
+                <MatSortHeader SortId="CompletedOnUtc" Style="width:20%;">Completed On</MatSortHeader>
+                <MatSortHeader SortId="State" Style="width:10%;">State</MatSortHeader>
+                <MatSortHeader Style="width:auto;"></MatSortHeader>
+            </MatSortHeaderRow>
+        </MatTableHeader>
+        <MatTableRow>
+            <td>@context.Project?.Name</td>
+            <td>@context.SubmittedBy</td>
+            <td>@(context.SubmittedOnUtc.ToLocalTime())</td>
+            <td>@(context.CompletedOnUtc?.ToLocalTime())</td>
+            <td>@context.State</td>
+            <td><MatIconButton Icon="arrow_forward" Link="@($"/job/{context.ProjectJobId}")" /></td>
+        </MatTableRow>
+    </MatTable>
+}
+@code {
+    IEnumerable<ProjectJob> jobs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity;
+        var tenantId = Asi.DataMigrationService.Lib.MigrationUtility.GetTenant(user);
+        jobs = await ProjectQueries.GetProjectJobsAsync(tenantId);
+
+        if (jobs.Count() > 1)
+            jobs = jobs.OrderByDescending(i => i.SubmittedOnUtc).ToArray();
+
+        SortData(null);
+    }
+
+    void SortData(MatSortChangedEvent sort)
+    {
+        var sortedData = jobs.ToArray();
+        if (!(sort == null || sort.Direction == MatSortDirection.None || string.IsNullOrEmpty(sort.SortId)))
+        {
+            Comparison<ProjectJob> comparison = null;
+            switch (sort.SortId)
+            {
+                case "Name":
+                    comparison = (s1, s2) => string.Compare(s1.Project.Name, s2.Project.Name, StringComparison.InvariantCultureIgnoreCase);
+                    break;
+                case "SubmittedBy":
+                    comparison = (s1, s2) => s1.SubmittedBy.CompareTo(s2.SubmittedBy);
+                    break;
+                case "CompletedOnUtc":
+                    comparison = (s1, s2) => s1.CompletedOnUtc.HasValue.CompareTo(s2.CompletedOnUtc.HasValue);
+                    break;
+                case "State":
+                    comparison = (s1, s2) => s1.State.CompareTo(s2.State);
+                    break;
+                case "SubmittedOnUtc":
+                default:
+                    comparison = (s1, s2) => s1.SubmittedOnUtc.CompareTo(s2.SubmittedOnUtc);
+                    break;
+            }
+            if (comparison != null)
+            {
+                if (sort.Direction == MatSortDirection.Desc)
+                {
+                    Array.Sort(sortedData, (s1, s2) => -1 * comparison(s1, s2));
+                }
+                else
+                {
+                    Array.Sort(sortedData, comparison);
+                }
+            }
+            jobs = sortedData;
+        }
+    }
+}

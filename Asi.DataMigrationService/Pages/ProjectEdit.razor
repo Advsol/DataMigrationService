@@ -1,0 +1,252 @@
+﻿@page "/project"
+@page "/project/{projectId}"
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using Asi.DataMigrationService.Core
+@using Asi.DataMigrationService.Core.Extensions
+@using Asi.DataMigrationService.Lib.Data
+@using Asi.DataMigrationService.Lib.Data.Models
+@using Asi.DataMigrationService.Lib.Messages.Commands
+@using Asi.DataMigrationService.Lib.Publisher
+@using Asi.DataMigrationService.Lib.Services
+@using Asi.DataMigrationService.MessageQueue.Interfaces
+
+@inject ApplicationDbContext DbContext
+@inject IMessageQueueEndpoint MessageQueue
+@inject IEnumerable<IDataSourcePublisher> Processors
+@inject IMatToaster Toaster
+@inject IPublishService ProcessorService
+@inject NavigationManager NavigationManager
+
+<MatChip Label="Back" LeadingIcon="arrow_back" @onclick="Back"> </MatChip>
+<h2>Project - @Project?.Name</h2>
+@if (Project == null)
+{
+    <MatProgressCircle Indeterminate="true" Size="MatProgressCircleSize.Large" Class="middle-center" />
+}
+else
+{
+    <MatPaper Outlined="true" Rounded="true" Class="mb-3" Elevation="0">
+        <MatTextField Label="Name" Required="true" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@Project.Name" FullWidth="true" />
+        <MatTextField Label="Description" Style="margin-bottom: 20px" MaxLength="100" ReadOnly="@(!IsEditMode)" @bind-Value="@Project.Description" FullWidth="true" />
+        <div style="width: 200px; display: none;"><MatSlideToggle Class="ml-3 mr-2" @bind-Value="@Project.IsLocked" Label="Locked" Disabled="@(!IsEditMode)" /></div>
+        <MatSelectItem Label="Culture" Style="margin-bottom: 10px; display:none;" @bind-Value="@ProjectInfo.Culture" Items="@cultures" Disabled="@(!IsEditMode)" />
+        <MatCheckbox Label="Auto Assign PartyId" Disabled="@(!IsEditMode)" @bind-Value="@ProjectInfo.AutoAssignPartyId" Style="display:none;" />
+        <MatCheckbox Label="Allow Updates" Disabled="@(!IsEditMode)" @bind-Value="@ProjectInfo.AllowUpdates" Style="display:none;" />
+        <MatCheckbox Label="Create Accounts" Disabled="@(!IsEditMode)" @bind-Value="@ProjectInfo.CreateAccounts" Style="display:none;" />
+
+        <div class="p-3">
+            <MatButton OnClick="@EditAsync" Disabled="@(IsEditMode)" Outlined="true" Class="mr-1">Edit</MatButton>
+            <MatButton OnClick="@CancelAsync" Disabled="@(!IsEditMode)" Outlined="true" Class="mr-1">Cancel</MatButton>
+            <MatButton OnClick="@SaveChangesAsync" Disabled="@(!IsEditMode)" Type="submit" Outlined="true" Class="mr-1">Save changes</MatButton>
+            <MatButton OnClick="@DeleteDialogAsync" Disabled="@(!IsEditMode || Project.IsLocked || string.IsNullOrEmpty(Project.ProjectId))" Outlined="true" Class="mr-1">Delete project</MatButton>
+            <MatTooltip Tooltip="Validate on target system" Wrap="true">
+                <MatButton Link="@($"/publish/{ProjectId}/Validate")" Disabled="@IsEditMode" Outlined="false" Class="mr-1" Icon="link">Validate</MatButton>
+            </MatTooltip>
+            <MatTooltip Tooltip="Migrate to target system" Wrap="true">
+                <MatButton Link="@($"/publish/{ProjectId}/Publish")" Disabled="@IsEditMode" Outlined="false" Class="mr-1" Icon="link">Migrate</MatButton>
+            </MatTooltip>
+        </div>
+    </MatPaper>
+
+    <MatPaper Outlined="true" Rounded="true" Class="p-3" Elevation="0">
+        <h3>Data Sources</h3>
+        <MatDialog @bind-IsOpen="@dialogIsOpen">
+            <MatDialogTitle>Confirm Delete</MatDialogTitle>
+            <MatDialogContent>
+                <p><MatIcon Icon="@MatIconNames.Warning" Style="vertical-align: middle!important;"></MatIcon>Are you certain you wish to delete project @Project?.Name?</p>
+                <p>This action can not be reversed.</p>
+            </MatDialogContent>
+            <MatDialogActions>
+                <MatButton OnClick="@(e => { dialogIsOpen = false; })">Cancel</MatButton>
+                <MatButton OnClick="@DeleteAsync">OK</MatButton>
+            </MatDialogActions>
+        </MatDialog>
+
+        <MatTable Items="@DataSources" Style="border:0;" ShowPaging="false" PageSize="200">
+            <MatTableHeader>
+                <th style="width:99%;border:none;" class="p-3">
+                    <MatSelectValue @bind-Value="selectedDataSourceTypeName" Items="@PublisherTypes" ValueSelector="@(i => i.PublisherType)" Disabled="@(Project.IsLocked)" Style="width:265px;">
+                        <ItemTemplate>
+                            @context.Name
+                        </ItemTemplate>
+                    </MatSelectValue>
+                    <MatButton OnClick="@AddSource" Disabled="@(IsEditMode || Project.IsLocked)" Type="submit" Unelevated="true" Class="mb-2" Icon="add_box">Add Data Source</MatButton>
+                </th>
+                <th style="width:auto;border:none;"></th>
+            </MatTableHeader>
+            <MatTableRow>
+                <td colspan="2" style="border:none;" class="px-1">
+                    @ProcessorService.Create(context.DataSourceType)?.CreateUIComponent(Project, context, SourceLoginInformation)
+                </td>
+            </MatTableRow>
+        </MatTable>
+    </MatPaper>
+}
+
+@code {
+
+    [Parameter]
+    public string ProjectId { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    bool dialogIsOpen = false;
+    public LoginInformation SourceLoginInformation { get; set; } = new LoginInformation();
+    bool IsEditMode { get; set; }
+    Project Project { get; set; }
+    ProjectInfo ProjectInfo { get; set; }
+    IList<ProjectDataSource> DataSources { get; set; } = new List<ProjectDataSource>();
+    List<(string PublisherType, string Name)> PublisherTypes { get; set; } = new List<(string PublisherType, string Name)>();
+    string selectedDataSourceTypeName = string.Empty;
+    static string[] cultures = new[]
+    {
+        "en-AU",
+        "en-CA",
+        "en-GB",
+        "en-US",
+        "es",
+        "fr"
+    };
+
+    void Back()
+    {
+        if (ProjectId is null)
+        {
+            NavigationManager.NavigateTo("/projects", true);
+            return;
+        }
+
+        if (!IsEditMode) NavigationManager.NavigateTo("/projects");
+    }
+
+    Task EditAsync()
+    {
+        IsEditMode = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    Task DeleteDialogAsync()
+    {
+        dialogIsOpen = true;
+        return Task.CompletedTask;
+    }
+
+    async Task DeleteAsync()
+    {
+        dialogIsOpen = false;
+        var result = await MessageQueue.RequestAsync(new DeleteProject(ProjectId), new SendOptions { ServiceContext = await GetServiceContextAsync() });
+        if (!result.IsSuccessStatusCode)
+        {
+            ShowError(result.Message);
+            return;
+        }
+        NavigationManager.NavigateTo("/projects");
+        return;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadDataAsync();
+        PublisherTypes = ProcessorService.GetProcessorTypeNames();
+    }
+
+    async Task LoadDataAsync()
+    {
+
+        if (ProjectId is null)
+        {
+            IsEditMode = true;
+            Project = new Project();
+            ProjectInfo = new ProjectInfo();
+        }
+        else
+        {
+            Project = (await DbContext.Projects.Include(p => p.DataSources).Where(p => p.ProjectId == ProjectId).ToListAsync()).FirstOrDefault();
+            ProjectInfo = Project.GetProjectInfo();
+            // order by dependencies, then type name
+            DataSources = Project?.DataSources?.OrderBy(p => p.DataSourceType).TopologicalSort(Dependencies).ToList();
+        }
+    }
+
+    IEnumerable<ProjectDataSource> Dependencies(ProjectDataSource sourceDataSource) => Project.DataSources.Where(testDataSource =>
+    {
+        var p1 = ProcessorService.Create(sourceDataSource.DataSourceType);
+        if (p1 is null) return false;
+        var p2 = ProcessorService.Create(testDataSource.DataSourceType);
+        if (p2 is null) return false;
+        return p1.DependentPublisherTypeNames.ContainsOrdinalIgnoreCase(p2.DataSourceTypeName);
+    });
+
+    async void CancelAsync()
+    {
+        if (ProjectId is null)
+        {
+            NavigationManager.NavigateTo("/projects", true);
+            return;
+        }
+        await LoadDataAsync();
+        IsEditMode = false;
+        StateHasChanged();
+    }
+
+    async void SaveChangesAsync()
+    {
+        if (ProjectId is null)
+        {
+            var m = new CreateProject(Project.Name, Project.Description, ProjectInfo);
+            var response = await MessageQueue.RequestAsync(m, new SendOptions { ServiceContext = await GetServiceContextAsync() });
+            if (response.IsSuccessStatusCode)
+            {
+                ProjectId = response.Result.ToString();
+                Project = (await DbContext.Projects.Include(p => p.DataSources).Where(p => p.ProjectId == ProjectId).ToListAsync()).FirstOrDefault();
+                IsEditMode = false;
+                ShowSuccess($"Created project: {Project.Name}.");
+            }
+            else
+            {
+                ShowError(response.Message);
+            }
+        }
+        else
+        {
+            Project.SetProjectInfo(ProjectInfo);
+            await DbContext.SaveChangesAsync();
+            IsEditMode = false;
+        }
+        StateHasChanged();
+    }
+
+    void AddSource(MouseEventArgs e)
+    {
+        if (string.IsNullOrEmpty(selectedDataSourceTypeName))
+        {
+            ShowError("Select a data source to add");
+            return;
+        }
+        var newSource = new ProjectDataSource { DataSourceType = selectedDataSourceTypeName, ProjectId = ProjectId };
+        DataSources.Insert(0, newSource);
+    }
+
+    async Task<IServiceContext> GetServiceContextAsync()
+    {
+        var authState = await authenticationStateTask;
+        var identity = (ClaimsIdentity)authState.User.Identity;
+        identity.AddClaim(new Claim(Asi.Core.Interfaces.AppClaimTypes.TenantId, Asi.DataMigrationService.Lib.MigrationUtility.GetTenant(identity)));
+        return new ServiceContext((ClaimsIdentity)authState.User.Identity);
+    }
+
+    void ShowError(string message)
+    {
+        Toaster.Add(message, MatToastType.Danger, "Error");
+    }
+
+    void ShowSuccess(string message)
+    {
+        Toaster.Add(message, MatToastType.Success);
+    }
+
+}
