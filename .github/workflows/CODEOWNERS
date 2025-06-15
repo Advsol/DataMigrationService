@@ -2,7 +2,7 @@
 # the repo. Unless a later match takes precedence,
 # they will be requested for
 # review when someone opens a pull request.
-*   @JdeckeriMIS @cespino @pablo-polanco
+*   @JdeckeriMIS @cespino
 
 # Protecting the code owners file as well
-/.github/ @JdeckeriMIS @cespino @pablo-polanco
+/.github/ @JdeckeriMIS @cespino
